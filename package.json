@@ -1,0 +1,19 @@
+{
+  "name": "pnw-recruitment-bot",
+  "version": "1.0.0",
+  "description": "Politics & War Discord recruitment and mail bridge bot",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "deploy-commands": "node src/deployCommands.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
