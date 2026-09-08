@@ -30,7 +30,18 @@ async function pnwRequest(query, variables = {}, apiKeyOverride = null) {
     body: JSON.stringify({ query, variables }),
   });
 
-  const json = await response.json();
+const text = await response.text();
+
+let json;
+try {
+  json = JSON.parse(text);
+} catch (err) {
+  console.error('❌ PnW returned non-JSON response.');
+  console.error('Status:', response.status, response.statusText);
+  console.error('Content-Type:', response.headers.get('content-type'));
+  console.error('Response:', text.slice(0, 500));
+  throw new Error(`PnW returned non-JSON response (HTTP ${response.status})`);
+}
 
   if (json.errors) {
     const message = json.errors.map((e) => e.message).join('; ');
