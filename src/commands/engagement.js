@@ -352,7 +352,7 @@ module.exports = {
       if (!campaign) return interaction.editReply(`❌ Campaign "${campaignId}" not found.`);
 
       const messages = eng.getMessagesForCampaign(campaignId);
-      if (messages.length === 0) return interaction.editReply(`No messages in this campaign yet.`);
+      if (messages.length === 0) return interaction.editReply(`No messages configured in this campaign yet.`);
 
       await interaction.editReply(`🔍 Fetching current member list for alliance #${campaign.allianceId}...`);
 
@@ -362,41 +362,79 @@ module.exports = {
 
       const rows = [];
       let wouldSend = 0;
-      let wouldSkip = 0;
-      let wouldComplete = 0;
+      let wouldSkipCooldown = 0;
+      let wouldSkipCompleted = 0;
+      let wouldIneligible = 0;
 
-      for (const nation of members.slice(0, 50)) { // preview first 50 only
+      // Evaluate ALL members for accurate stats, but only collect
+      // display rows for the first 30 who would actually receive mail
+      for (const nation of members) {
         const state = eng.getMemberState(campaignId, nation.id);
 
-        if (state?.completed) { wouldComplete++; continue; }
-        if (state && eng.daysSince(state.lastMessageAt) * 24 < campaign.cooldownHours) { wouldSkip++; continue; }
-        if (state && state.totalSent >= campaign.maxMessagesPerMember) { wouldComplete++; continue; }
+        if (state?.completed) { wouldSkipCompleted++; continue; }
+        if (state && state.totalSent >= campaign.maxMessagesPerMember) { wouldSkipCompleted++; continue; }
+        if (state && eng.daysSince(state.lastMessageAt) * 24 < campaign.cooldownHours) { wouldSkipCooldown++; continue; }
 
         const next = eng.getNextMessageForMember(campaignId, nation, state);
 
         if (!next) {
-          rows.push(`⏭️ **${nation.nation_name}** — no eligible message (cities: ${nation.num_cities}, new member: ${state ? 'no' : 'yes'})`);
-        } else {
-          rows.push(`📨 **${nation.nation_name}** (C${nation.num_cities}) → Seq #${next.message.sequenceOrder}: *"${next.message.subject}"*`);
-          wouldSend++;
+          wouldIneligible++;
+          continue;
+        }
+
+        wouldSend++;
+
+        if (rows.length < 30) {
+          const label = `📨 ${nation.nation_name} (C${nation.num_cities}) → Seq #${next.message.sequenceOrder}: "${next.message.subject}"`;
+          // Cap each row at 100 chars so long names/subjects don't blow out fields
+          rows.push(label.length > 100 ? label.slice(0, 97) + '...' : label);
         }
       }
 
-      const preview = rows.slice(0, 20).join('\n');
-      const truncated = members.length > 50 ? `\n\n*(Preview limited to first 50 members. Alliance has ${members.length} total.)*` : '';
+      // Split rows across multiple embed fields — Discord caps each field
+      // value at 1024 chars, and with 30+ messages this is easily exceeded
+      const FIELD_LIMIT = 1024;
+      const fieldChunks = [];
+      let current = '';
+      for (const row of rows) {
+        const candidate = current ? `${current}\n${row}` : row;
+        if (candidate.length > FIELD_LIMIT) {
+          if (current) fieldChunks.push(current);
+          current = row;
+        } else {
+          current = candidate;
+        }
+      }
+      if (current) fieldChunks.push(current);
+      if (fieldChunks.length === 0) fieldChunks.push('No members are currently eligible to receive a message.');
 
       const embed = new EmbedBuilder()
         .setTitle(`🔍 Preview — ${campaign.name}`)
         .setColor(0xf1c40f)
-        .addFields(
-          { name: 'Would send', value: String(wouldSend), inline: true },
-          { name: 'In cooldown / already completed', value: String(wouldSkip + wouldComplete), inline: true },
-          { name: 'Total members', value: String(members.length), inline: true },
-          { name: 'Sample (first 20 eligible)', value: (preview || 'None') + truncated },
-        );
+        .addFields({
+          name: '📊 Summary',
+          value:
+            `Would send: **${wouldSend}** | In cooldown: **${wouldSkipCooldown}** | ` +
+            `Completed: **${wouldSkipCompleted}** | No eligible message: **${wouldIneligible}** | ` +
+            `Total members: **${members.length}**`,
+        });
+
+      fieldChunks.forEach((chunk, i) => {
+        embed.addFields({
+          name: i === 0
+            ? `📨 Would receive mail (showing first ${Math.min(wouldSend, 30)} of ${wouldSend})`
+            : `📨 (continued)`,
+          value: chunk,
+        });
+      });
+
+      if (wouldSend > 30) {
+        embed.setFooter({ text: `Preview truncated — showing 30 of ${wouldSend} eligible members.` });
+      }
 
       return interaction.editReply({ embeds: [embed] });
     }
+
 
     if (sub === 'run') {
       await interaction.deferReply({ flags: 64 });
